@@ -7,6 +7,11 @@ use rand::prelude::*;
 use std::f64::{consts::PI, INFINITY};
 
 type Color = [u8; 3];
+type ColorBase = [u8; 3];
+
+fn color_base_to_color(cb: ColorBase, color_size: u64) -> Color {
+    cb.map(|cbc| (cbc as u64 * 255 / (color_size - 1)) as u8)
+}
 type ColorOffset = [i16; 3];
 type Location = [usize; 2];
 type LocationOffset = [isize; 2];
@@ -21,15 +26,15 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
     let mut rng = StdRng::seed_from_u64(seed);
     let size = scale.pow(3) as usize;
     let color_size = scale.pow(2);
-    let mut colors: Vec<Color> = (0..scale.pow(6))
+    let mut color_bases: Vec<ColorBase> = (0..scale.pow(6))
         .map(|n| {
             let r_base = n % color_size;
             let g_base = (n / color_size) % color_size;
             let b_base = n / color_size.pow(2);
-            [r_base, g_base, b_base].map(|c_base| (c_base * (255 / (color_size - 1))) as u8)
+            [r_base as u8, g_base as u8, b_base as u8]
         })
         .collect();
-    let mut color_offsets: Vec<ColorOffset> = colors
+    let mut color_offsets: Vec<ColorOffset> = color_bases
         .iter()
         .map(|color| color.map(|c| c as i16))
         .flat_map(|color| {
@@ -46,7 +51,7 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
             .into_iter()
         })
         .collect();
-    colors.shuffle(&mut rng);
+    color_bases.shuffle(&mut rng);
     color_offsets
         .sort_by_key(|color_offset| color_offset.map(|c| (c as i64).pow(2)).iter().sum::<i64>());
     let mut location_offsets: Vec<LocationOffset> = (0..scale.pow(6) / 2)
@@ -59,9 +64,9 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
     location_offsets
         .sort_by_key(|location_offset| location_offset.map(|l| l.pow(2)).iter().sum::<isize>());
     let mut grid: Vec<Vec<Option<Pixel>>> = vec![vec![None; size]; size];
-    let mut color_to_location: HashMap<Color, Location> = HashMap::new();
+    let mut color_base_to_location: HashMap<ColorBase, Location> = HashMap::new();
     let mut seed_locs: Vec<Location> = vec![];
-    for (i, color) in colors.into_iter().enumerate() {
+    for (i, color_base) in color_bases.into_iter().enumerate() {
         if i < num_seeds {
             let mut row = rng.gen_range(0..size);
             let mut col = rng.gen_range(0..size);
@@ -90,23 +95,23 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
             }
             let angle = rng.gen_range(0.0..2.0 * PI);
             let pixel = Pixel {
-                color,
+                color: color_base_to_color(color_base, color_size),
                 direction: angle,
             };
             grid[row][col] = Some(pixel);
-            color_to_location.insert(color, [row, col]);
+            color_base_to_location.insert(color_base, [row, col]);
             seed_locs.push([row, col]);
             continue;
         }
         let most_similar_location: Location = color_offsets
             .iter()
             .filter_map(|color_offset| {
-                let prov_new_color = color.zip(*color_offset).map(|(c, co)| c as i16 + co);
-                if prov_new_color.iter().any(|&c| c < 0 || c > 255) {
+                let prov_new_color_base = color_base.zip(*color_offset).map(|(c, co)| c as i16 + co);
+                if prov_new_color_base.iter().any(|&c| c < 0 || c > 255) {
                     None
                 } else {
-                    let new_color = prov_new_color.map(|c| c as u8);
-                    color_to_location.get(&new_color).copied()
+                    let new_color_base = prov_new_color_base.map(|c| c as u8);
+                    color_base_to_location.get(&new_color_base).copied()
                 }
             })
             .next()
@@ -151,9 +156,9 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
         }
         let closest_location = closest_location.expect("Found a slot");
         let direction = closest_angle.unwrap();
-        let pixel = Pixel { color, direction };
+        let pixel = Pixel { color: color_base_to_color(color_base, color_size), direction };
         grid[closest_location[0]][closest_location[1]] = Some(pixel);
-        color_to_location.insert(color, closest_location);
+        color_base_to_location.insert(color_base, closest_location);
     }
     let mut img: RgbImage = ImageBuffer::new(size as u32, size as u32);
     for (i, row) in grid.into_iter().enumerate() {
