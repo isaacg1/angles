@@ -49,7 +49,7 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
     colors.shuffle(&mut rng);
     color_offsets
         .sort_by_key(|color_offset| color_offset.map(|c| (c as i64).pow(2)).iter().sum::<i64>());
-    let mut location_offsets: Vec<LocationOffset> = (0..scale.pow(6)/2)
+    let mut location_offsets: Vec<LocationOffset> = (0..scale.pow(6) / 2)
         .flat_map(|n| {
             let i = (n as usize % size) as isize;
             let j = (n as usize / size) as isize;
@@ -60,10 +60,34 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
         .sort_by_key(|location_offset| location_offset.map(|l| l.pow(2)).iter().sum::<isize>());
     let mut grid: Vec<Vec<Option<Pixel>>> = vec![vec![None; size]; size];
     let mut color_to_location: HashMap<Color, Location> = HashMap::new();
+    let mut seed_locs: Vec<Location> = vec![];
     for (i, color) in colors.into_iter().enumerate() {
         if i < num_seeds {
-            let row = rng.gen_range(0..size);
-            let col = rng.gen_range(0..size);
+            let mut row = rng.gen_range(0..size);
+            let mut col = rng.gen_range(0..size);
+            loop {
+                let mut too_close = false;
+                for loc in &seed_locs {
+                    let dist_sq: isize = loc.zip([row, col]).map(|(l1, l2)| {
+                        let il1 = l1 as isize;
+                        let il2 = l2 as isize;
+                        (il1 - il2)
+                            .abs()
+                            .min(il1 - il2 + size as isize)
+                            .min(il1 - il2 + size as isize)
+                    }).map(|d| d.pow(2)).iter().sum::<isize>();
+                    let dist: f64 = (dist_sq as f64).sqrt();
+                    let min_spacing = size as f64 / (2.0 * (num_seeds as f64).sqrt());
+                    if dist < min_spacing {
+                        too_close = true;
+                    }
+                }
+                if !too_close {
+                    break
+                }
+                row = rng.gen_range(0..size);
+                col = rng.gen_range(0..size);
+            }
             let angle = rng.gen_range(0.0..2.0 * PI);
             let pixel = Pixel {
                 color,
@@ -71,6 +95,7 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
             };
             grid[row][col] = Some(pixel);
             color_to_location.insert(color, [row, col]);
+            seed_locs.push([row, col]);
             continue;
         }
         let most_similar_location: Location = color_offsets
@@ -143,7 +168,7 @@ fn make_image(scale: u64, spread: f64, num_seeds: usize, seed: u64) -> RgbImage 
 
 fn main() {
     for scale in 7..=10 {
-        let spread = 0.3;
+        let spread = 0.15;
         let num_seeds = 20;
         let seed = 0;
         let filename = format!("img-{}-{}-{}-{}.png", scale, spread, num_seeds, seed);
